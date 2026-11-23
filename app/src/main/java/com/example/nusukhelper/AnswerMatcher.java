@@ -18,7 +18,7 @@ public final class AnswerMatcher {
             "the", "of", "a", "an", "al", "as", "is", "and", "or", "to", "in", "on", "by", "for", "was", "ibn", "bin"));
 
     /** Captions like "4. Mecca", "4) Mecca", "4 Mecca" or a lone "4" at the start of a line. */
-    private static final Pattern LEAD = Pattern.compile("(?m)^\\s*([1-4])(?:\\s*[.):,\\-]\\s*|\\s+)\\p{L}|^\\s*([1-4])\\s*$");
+    private static final Pattern LEAD = Pattern.compile("(?m)^\\s*([1-4])\\s*[.):]\\s*\\p{L}");
     /** The app's own spoken prompt can be transcribed into the caption: remove it before matching. */
     private static final Pattern OWN = Pattern.compile(
             "(?i)from now on,? each time i say answer,? look at the screen and reply only with the option number and the answer\\.?|(?m)^\\s*answer\\.?\\s*$");
@@ -46,7 +46,7 @@ public final class AnswerMatcher {
         }
         if (idx >= 0) return idx;
         Matcher lm = LEAD.matcher(caption);
-        while (lm.find()) idx = Integer.parseInt(lm.group(1) != null ? lm.group(1) : lm.group(2)) - 1;
+        while (lm.find()) idx = Integer.parseInt(lm.group(1)) - 1;
         if (idx >= 0) return idx;
         Matcher om = ORD.matcher(caption);
         while (om.find()) {
@@ -126,5 +126,20 @@ public final class AnswerMatcher {
         return -1;
     }
 
-    static String norm(String s) { return s.toLowerCase().replaceAll("[^\\p{L}\\p{N}]+", " ").trim(); }
+    /** Lower-case words only, with common spelling variants folded together (Mecca = Makkah, Medina = Madinah...). */
+    static String norm(String s) {
+        String[] w = s.toLowerCase().replaceAll("[^\\p{L}\\p{N}]+", " ").trim().split(" ");
+        StringBuilder sb = new StringBuilder();
+        for (String x : w) {
+            switch (x) {
+                case "mecca": case "makka": case "makkah": case "mekka": x = "makkah"; break;
+                case "medina": case "madina": case "madinah": x = "madinah"; break;
+                case "koran": case "quran": case "qur": x = "quran"; break;
+                case "muhammad": case "mohammed": case "mohammad": x = "muhammad"; break;
+            }
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(x);
+        }
+        return sb.toString();
+    }
 }

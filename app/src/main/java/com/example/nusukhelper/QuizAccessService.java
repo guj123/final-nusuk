@@ -99,7 +99,12 @@ public class QuizAccessService extends NusukAccessService {
         }
     };
 
-    @Override public void onAccessibilityEvent(AccessibilityEvent e) { }
+    private volatile long lastGeminiEvent;
+
+    @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+        CharSequence p = e.getPackageName();
+        if (p != null && isGemini(p.toString())) lastGeminiEvent = System.currentTimeMillis();
+    }
     @Override public void onInterrupt() { }
 
     @Override
@@ -394,7 +399,10 @@ public class QuizAccessService extends NusukAccessService {
         // 2) otherwise follow Gemini's caption
         if (!manual) {
             if (isNew) { status("New question: " + shorten(s.question) + (s.caption.isEmpty() ? " (no Gemini caption: turn captions on)" : "")); return; }
-            boolean fresh = !s.caption.equals(baseline) && !s.caption.isEmpty();   // ignore the previous question's caption
+            // fresh = the caption differs from the one seen when the question appeared, OR Gemini's window
+            // updated after the question appeared (an identical answer such as "Option 2" twice in a row)
+            boolean fresh = !s.caption.isEmpty()
+                    && (!s.caption.equals(baseline) || lastGeminiEvent > questionSince + 400);   // ignore the previous question's caption
             int idx = -1;
             if (fresh) {
                 if (s.caption.equals(prevCap)) stable++; else stable = 0;
@@ -411,7 +419,8 @@ public class QuizAccessService extends NusukAccessService {
                 act(s, g, "guess");
                 return;
             }
-            if (ask && ttsReady && askCount < 3 && now - questionSince > 1500 && now - lastAskAt > 10000) {
+            boolean gemQuiet = now - lastGeminiEvent > 1500 || now - questionSince > 6000;   // do not talk over Gemini
+            if (ask && ttsReady && askCount < 3 && now - questionSince > 1500 && now - lastAskAt > 10000 && gemQuiet) {
                 askCount++; lastAskAt = now;
                 String say;
                 if (!briefed) {             // Auto was started before the voice engine was ready
@@ -424,7 +433,7 @@ public class QuizAccessService extends NusukAccessService {
                 status("Asked Gemini by voice (" + askCount + "/3)");
                 return;
             }
-            status(fresh ? "Gemini unclear - ask again (not guessing)" : "Waiting for Gemini…");
+            status(fresh ? "Unclear (not guessing): " + shorten(tail(s.caption)) : "Waiting for Gemini…");
             return;
         }
         if (s.caption.isEmpty()) { status("No Gemini caption found"); return; }
@@ -508,6 +517,11 @@ public class QuizAccessService extends NusukAccessService {
                 return;
             }
         }
+    }
+
+    private static String tail(String c) {
+        c = c.replace("\n", " / ");
+        return c.length() > 50 ? "…" + c.substring(c.length() - 50) : c;
     }
 
     private static String shorten(String s) { return s.length() > 60 ? s.substring(0, 57) + "..." : s; }

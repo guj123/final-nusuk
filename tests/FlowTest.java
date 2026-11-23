@@ -66,6 +66,12 @@ public class FlowTest {
         check(AnswerMatcher.pick("Answer.\n2) Taif", mk, false) == 1, "'2) Taif' -> option 2");
         check(AnswerMatcher.pick("From now on, each time I say answer, look at the screen and reply only with the option number and the answer. Answer.", mk, true) == -1, "own prompt ignored");
         check(AnswerMatcher.pick("In Surah 2: Mecca", mk, false) == 3, "mid-line number not mistaken");
+        check(AnswerMatcher.pick("Option 1, Mecca", Arrays.asList("Makkah", "Taif", "Jeddah", "Madinah"), false) == 0, "'Option 1, Mecca'");
+        check(AnswerMatcher.pick("Mecca", Arrays.asList("Makkah and the Grand Mosque", "Madinah and the Prophet's Mosque", "The Quran", "The Prophet's Biography"), true) == 0, "'Mecca' = Makkah option");
+        check(AnswerMatcher.pick("Option 1", Arrays.asList("Makkah", "Taif", "Jeddah", "Madinah"), false) == 0, "'Option 1'");
+        List<String> mk2 = Arrays.asList("Madinah", "Taif", "Jeddah", "Mecca");
+        check(AnswerMatcher.pick("Live\n1\nSharing screen", mk2, true) == -1, "stray '1' on its own line is NOT option 1");
+        check(AnswerMatcher.pick("Something unrelated", mk2, true) == -1, "unrelated text -> no pick");
         System.exit(fails == 0 ? 0 : 1);
     }
 }

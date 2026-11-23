@@ -153,31 +153,42 @@ public class NusukAccessService extends AccessibilityService {
         return false;
     }
 
+    private static boolean setText(AccessibilityNodeInfo n, String t) {
+        Bundle b = new Bundle();
+        b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, t);
+        return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b);
+    }
+
     private void enterCode(String code) throws InterruptedException {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         AccessibilityNodeInfo ed = root == null ? null : findEditable(root);
+        boolean done = false;
         if (ed != null) {
             ed.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
             ed.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            Bundle b = new Bundle();
-            b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, code);
-            if (ed.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b)) {
-                sleep(300);
-                if (screenText().contains(code)) return;
-            }
+            done = setText(ed, code);            // if Android accepted it, trust it (no second entry)
+            sleep(300);
         }
-        // fallback: tap the field like the macro did, then paste from clipboard
-        ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE))
-                .setPrimaryClip(ClipData.newPlainText("code", code));
-        tapRef(221, 1040); sleep(300);
-        tapRef(221, 1040); sleep(300);
+        if (!done) {
+            // fallback only when SET_TEXT was refused: tap the field like the macro did, clear it, paste once
+            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE))
+                    .setPrimaryClip(ClipData.newPlainText("code", code));
+            tapRef(221, 1040); sleep(300);
+            root = getRootInActiveWindow();
+            AccessibilityNodeInfo f = root == null ? null : root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+            if (f == null && root != null) f = findEditable(root);
+            if (f != null) {
+                setText(f, "");
+                f.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+            }
+            sleep(300);
+        }
+        // guard: the field must hold the code exactly once
         root = getRootInActiveWindow();
-        AccessibilityNodeInfo f = root == null ? null : root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
-        if (f != null) {
-            Bundle b = new Bundle();
-            b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
-            f.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b);
-            f.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+        AccessibilityNodeInfo e2 = root == null ? null : findEditable(root);
+        if (e2 != null && e2.getText() != null) {
+            String cur = e2.getText().toString();
+            if (cur.contains(code) && !cur.trim().equals(code)) setText(e2, code);
         }
     }
 

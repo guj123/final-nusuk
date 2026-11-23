@@ -57,3 +57,11 @@ Permissions: Internet is used ONLY when you press 'Download and merge answers' (
 - Captions like "4. Mecca" / "2) Taif" understood; own spoken prompt ignored in captions.
 - Lock on CODES and QUIZ boxes (touches pass through only while the app sends its own gestures). Double-tap status text to unlock.
 - Compact single-line buttons (no more L/o/c/k on separate lines); quiz box has two rows.
+
+=== v13 ===
+- Code entry: trusts SET_TEXT (no second paste), clears before paste, and final guard keeps the code exactly once.
+- Quiz: identical repeated captions (Option 2 twice) now detected via Gemini window events; Mecca=Makkah, Medina=Madinah synonyms; status shows what it heard when unclear.
+
+=== v14 ===
+- Stray single digits in the Gemini window are no longer read as an option number (only "4. Mecca" style).
+- Ask waits until Gemini is quiet (max 6 s) so it does not talk over Gemini.
