@@ -17,6 +17,12 @@ public final class AnswerMatcher {
     private static final Set<String> STOP = new HashSet<>(Arrays.asList(
             "the", "of", "a", "an", "al", "as", "is", "and", "or", "to", "in", "on", "by", "for", "was", "ibn", "bin"));
 
+    /** Captions like "4. Mecca", "4) Mecca", "4 Mecca" or a lone "4" at the start of a line. */
+    private static final Pattern LEAD = Pattern.compile("(?m)^\\s*([1-4])(?:\\s*[.):,\\-]\\s*|\\s+)\\p{L}|^\\s*([1-4])\\s*$");
+    /** The app's own spoken prompt can be transcribed into the caption: remove it before matching. */
+    private static final Pattern OWN = Pattern.compile(
+            "(?i)from now on,? each time i say answer,? look at the screen and reply only with the option number and the answer\\.?|(?m)^\\s*answer\\.?\\s*$");
+
     private static final Pattern ORD = Pattern.compile(
             "(?i)\\b(first|second|third|fourth|last)\\s+(?:option|choice|answer|one)\\b");
 
@@ -28,7 +34,9 @@ public final class AnswerMatcher {
      * that points to exactly one option.
      */
     public static int pick(String caption, List<String> options, boolean partial) {
-        if (caption == null || caption.trim().isEmpty() || options.size() != 4) return -1;
+        if (caption == null || options.size() != 4) return -1;
+        caption = OWN.matcher(caption).replaceAll("");
+        if (caption.trim().isEmpty()) return -1;
 
         Matcher m = NUM.matcher(caption);
         int idx = -1;
@@ -36,6 +44,9 @@ public final class AnswerMatcher {
             int v = num(m.group(1));
             if (v >= 1 && v <= 4) idx = v - 1;                 // last spoken number wins
         }
+        if (idx >= 0) return idx;
+        Matcher lm = LEAD.matcher(caption);
+        while (lm.find()) idx = Integer.parseInt(lm.group(1) != null ? lm.group(1) : lm.group(2)) - 1;
         if (idx >= 0) return idx;
         Matcher om = ORD.matcher(caption);
         while (om.find()) {

@@ -73,9 +73,9 @@ public class QuizAccessService extends NusukAccessService {
     private android.speech.tts.TextToSpeech tts;
     private boolean ttsReady;
     private boolean briefed;
-    private View lockView;
     private boolean locked;
-    private LinearLayout btnRow;
+    private LinearLayout btnRow, btnRow2;
+    private PocketLock pocket;
     private Button lockBtn;
     private int askCount;
     private long lastAskAt;
@@ -147,15 +147,19 @@ public class QuizAccessService extends NusukAccessService {
         row.setOrientation(LinearLayout.HORIZONTAL);
         autoBtn = button("Auto", v -> toggleAuto());
         row.addView(autoBtn);
-        guessBtn = button("Guess: off", v -> { guess = !guess; guessBtn.setText(guess ? "Guess: on" : "Guess: off"); });
-        row.addView(guessBtn);
-        askBtn = button("Ask: on", v -> { ask = !ask; askBtn.setText(ask ? "Ask: on" : "Ask: off"); });
-        row.addView(askBtn);
-        row.addView(button("X", v -> hideBox()));
         lockBtn = button("Lock", v -> setLocked(true));
         row.addView(lockBtn);
+        row.addView(button("X", v -> hideBox()));
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        guessBtn = button("Guess: off", v -> { guess = !guess; guessBtn.setText(guess ? "Guess: on" : "Guess: off"); });
+        row2.addView(guessBtn);
+        askBtn = button("Ask: on", v -> { ask = !ask; askBtn.setText(ask ? "Ask: on" : "Ask: off"); });
+        row2.addView(askBtn);
         btnRow = row;
+        btnRow2 = row2;
         box.addView(row);
+        box.addView(row2);
 
         lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -203,40 +207,23 @@ public class QuizAccessService extends NusukAccessService {
         box = null;
     }
 
-    /**
-     * Pocket mode: an invisible full-screen layer swallows accidental touches and the screen is dimmed.
-     * It is NOT black, so Gemini's screen share still sees the real screen. Buttons are hidden while locked.
-     */
     private void setLocked(boolean on) {
         if (on == locked || wm == null || box == null) return;
         locked = on;
         if (on) {
-            lockView = new View(this);
-            lockView.setOnTouchListener((v, e) -> true);
-            WindowManager.LayoutParams lp2 = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                            | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
-                    PixelFormat.TRANSLUCENT);
-            lp2.screenBrightness = 0.02f;
-            wm.addView(lockView, lp2);
-            btnRow.setVisibility(View.GONE);
-            try { wm.removeView(box); wm.addView(box, lp); } catch (Exception ignored) { }   // keep the box above the layer
+            pocket = new PocketLock(wm, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY);
+            pocket.lock(this, box, lp);
+            btnRow.setVisibility(View.GONE); btnRow2.setVisibility(View.GONE);
             status("Locked: double-tap this text to unlock");
         } else {
-            if (lockView != null) { try { wm.removeView(lockView); } catch (Exception ignored) { } lockView = null; }
-            btnRow.setVisibility(View.VISIBLE);
+            if (pocket != null) pocket.unlock();
+            pocket = null;
+            btnRow.setVisibility(View.VISIBLE); btnRow2.setVisibility(View.VISIBLE);
             status("Unlocked");
         }
     }
 
-    private Button button(String t, View.OnClickListener c) {
-        Button b = new Button(this);
-        b.setText(t); b.setAllCaps(false); b.setMinWidth(0); b.setMinimumWidth(dp(52));
-        b.setOnClickListener(c);
-        return b;
-    }
+    private Button button(String t, View.OnClickListener c) { return PocketLock.button(this, t, c); }
 
     private void toggleAuto() {
         auto = !auto;
@@ -529,6 +516,8 @@ public class QuizAccessService extends NusukAccessService {
         if (it.click != null && it.click.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
         Path p = new Path();
         p.moveTo(it.bounds.centerX(), it.bounds.centerY());
+        final PocketLock pl = PocketLock.current;
+        if (pl != null) { pl.pass(true); ui.postDelayed(() -> pl.pass(false), 600); }
         return dispatchGesture(new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(p, 0, 60)).build(), null, null);
     }

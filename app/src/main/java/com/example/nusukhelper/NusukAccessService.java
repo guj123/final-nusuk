@@ -255,11 +255,17 @@ public class NusukAccessService extends AccessibilityService {
         GestureDescription g = new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(p, 0, dur)).build();
         CountDownLatch done = new CountDownLatch(1);
+        PocketLock pl = PocketLock.current;
+        if (pl != null) pl.pass(true);
         boolean ok = dispatchGesture(g, new GestureResultCallback() {
             @Override public void onCompleted(GestureDescription d) { done.countDown(); }
             @Override public void onCancelled(GestureDescription d) { done.countDown(); }
         }, null);
-        if (ok) done.await(dur + 2000, TimeUnit.MILLISECONDS);
+        try {
+            if (ok) done.await(dur + 2000, TimeUnit.MILLISECONDS);
+        } finally {
+            if (pl != null) pl.pass(false);
+        }
     }
 
     private void sleep(long ms) throws InterruptedException {

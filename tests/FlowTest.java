@@ -61,6 +61,11 @@ public class FlowTest {
         check(AnswerMatcher.pick("the second option", o, true) == 1, "second option");
         check(AnswerMatcher.pick("Option 3", o, false) == 2, "option 3");
         check(AnswerMatcher.pick("Surah Al", o, true) == -1, "ambiguous 'Al' not taken");
+        List<String> mk = Arrays.asList("Madinah", "Taif", "Jeddah", "Mecca");
+        check(AnswerMatcher.pick("4. Mecca", mk, false) == 3, "'4. Mecca' -> option 4");
+        check(AnswerMatcher.pick("Answer.\n2) Taif", mk, false) == 1, "'2) Taif' -> option 2");
+        check(AnswerMatcher.pick("From now on, each time I say answer, look at the screen and reply only with the option number and the answer. Answer.", mk, true) == -1, "own prompt ignored");
+        check(AnswerMatcher.pick("In Surah 2: Mecca", mk, false) == 3, "mid-line number not mistaken");
         System.exit(fails == 0 ? 0 : 1);
     }
 }

@@ -27,7 +27,10 @@ public class OverlayService extends Service {
     private WindowManager wm;
     private LinearLayout root;
     private TextView tv;
-    private Button autoBtn;
+    private Button autoBtn, lockBtn;
+    private LinearLayout btnRow;
+    private PocketLock pocket;
+    private boolean locked;
     private WindowManager.LayoutParams lp;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private String statusLine = "";
@@ -75,7 +78,10 @@ public class OverlayService extends Service {
         row.setOrientation(LinearLayout.HORIZONTAL);
         autoBtn = button("Start", v -> toggleAuto());
         row.addView(autoBtn);
+        lockBtn = button("Lock", v -> setLocked(true));
+        row.addView(lockBtn);
         row.addView(button("X", v -> stopSelf()));
+        btnRow = row;
         root.addView(row);
 
         lp = new WindowManager.LayoutParams(
@@ -88,11 +94,18 @@ public class OverlayService extends Service {
         lp.x = dp(8);
         lp.y = dp(120);
         tv.setOnTouchListener(new View.OnTouchListener() {
-            float dx, dy; int sx, sy;
+            float dx, dy; int sx, sy; long down, lastTap; boolean moved;
             @Override public boolean onTouch(View v, MotionEvent e) {
                 switch (e.getAction()) {
-                    case MotionEvent.ACTION_DOWN: dx = e.getRawX(); dy = e.getRawY(); sx = lp.x; sy = lp.y; return true;
+                    case MotionEvent.ACTION_DOWN: dx = e.getRawX(); dy = e.getRawY(); sx = lp.x; sy = lp.y; down = e.getEventTime(); moved = false; return true;
+                    case MotionEvent.ACTION_UP:
+                        if (locked && !moved && e.getEventTime() - down < 500) {        // double tap to unlock
+                            if (e.getEventTime() - lastTap < 600) { lastTap = 0; setLocked(false); }
+                            else lastTap = e.getEventTime();
+                        }
+                        return true;
                     case MotionEvent.ACTION_MOVE:
+                        if (Math.abs(e.getRawX() - dx) + Math.abs(e.getRawY() - dy) > 20) moved = true;
                         lp.x = sx + (int) (e.getRawX() - dx); lp.y = sy + (int) (e.getRawY() - dy);
                         wm.updateViewLayout(root, lp); return true;
                 }
@@ -102,11 +115,24 @@ public class OverlayService extends Service {
         wm.addView(root, lp);
     }
 
-    private Button button(String t, View.OnClickListener c) {
-        Button b = new Button(this);
-        b.setText(t); b.setAllCaps(false); b.setMinWidth(0); b.setMinimumWidth(dp(52));
-        b.setOnClickListener(c);
-        return b;
+    private Button button(String t, View.OnClickListener c) { return PocketLock.button(this, t, c); }
+
+    /** Pocket mode for code entry: touches are blocked except while the app's own gestures run. */
+    private void setLocked(boolean on) {
+        if (on == locked || wm == null || root == null) return;
+        locked = on;
+        if (on) {
+            pocket = new PocketLock(wm, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
+            pocket.lock(this, root, lp);
+            btnRow.setVisibility(View.GONE);
+            statusLine = "Locked: double-tap this text to unlock";
+        } else {
+            if (pocket != null) pocket.unlock();
+            pocket = null;
+            btnRow.setVisibility(View.VISIBLE);
+            statusLine = "Unlocked";
+        }
+        refresh();
     }
 
     private void toggleAuto() {
@@ -130,6 +156,7 @@ public class OverlayService extends Service {
         NusukAccessService.listener = null;
         NusukAccessService s = NusukAccessService.instance;
         if (s != null) s.stopAuto();
+        if (pocket != null) pocket.unlock();
         if (root != null) wm.removeView(root);
         super.onDestroy();
     }
