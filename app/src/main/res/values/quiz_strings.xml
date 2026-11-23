@@ -1,0 +1,3 @@
+<resources>
+    <string name="quiz_a11y_desc">Reads the Nusuk question screen and Gemini captions, taps the chosen option and logs it.</string>
+</resources>
