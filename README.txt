@@ -65,3 +65,9 @@ Permissions: Internet is used ONLY when you press 'Download and merge answers' (
 === v14 ===
 - Stray single digits in the Gemini window are no longer read as an option number (only "4. Mecca" style).
 - Ask waits until Gemini is quiet (max 6 s) so it does not talk over Gemini.
+
+=== v15 ===
+- Root cause of "always option 1": the previous answer stayed in the Gemini window and was read as the new answer. Now only lines that appeared after the question count.
+- Ask retries until answered (no limit), never guesses.
+- Briefing: "just reply with the option number only"; best installed US voice, slower rate.
+- Scrolls the Nusuk screen when an option is off-screen or under the Gemini caption window.

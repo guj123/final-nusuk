@@ -21,7 +21,12 @@ public final class AnswerMatcher {
     private static final Pattern LEAD = Pattern.compile("(?m)^\\s*([1-4])\\s*[.):]\\s*\\p{L}");
     /** The app's own spoken prompt can be transcribed into the caption: remove it before matching. */
     private static final Pattern OWN = Pattern.compile(
-            "(?i)from now on,? each time i say answer,? look at the screen and reply only with the option number and the answer\\.?|(?m)^\\s*answer\\.?\\s*$");
+            "(?im)^.*(from now on|each time i say|reply with the option number|option number only).*$|^\\s*answer\\.?\\s*$");
+
+    /** Removes the app's own spoken prompt (and Gemini's acknowledgement of it) from a caption. */
+    public static String stripOwn(String caption) {
+        return caption == null ? "" : OWN.matcher(caption).replaceAll("");
+    }
 
     private static final Pattern ORD = Pattern.compile(
             "(?i)\\b(first|second|third|fourth|last)\\s+(?:option|choice|answer|one)\\b");
@@ -35,7 +40,7 @@ public final class AnswerMatcher {
      */
     public static int pick(String caption, List<String> options, boolean partial) {
         if (caption == null || options.size() != 4) return -1;
-        caption = OWN.matcher(caption).replaceAll("");
+        caption = stripOwn(caption);
         if (caption.trim().isEmpty()) return -1;
 
         Matcher m = NUM.matcher(caption);

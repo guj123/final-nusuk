@@ -26,7 +26,9 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -45,7 +47,7 @@ public class QuizAccessService extends NusukAccessService {
     private static final long RESULT_TIMEOUT_MS = 20000;
     /** No usable answer from memory or Gemini after this long: pick an option so the run keeps going. */
     private static final String BRIEFING =
-            "From now on, each time I say answer, look at the screen and reply only with the option number and the answer. Answer.";
+            "From now on, each time I say answer, just reply with the option number only, like option 1, option 2, and so on.";
     private static final long ANSWER_WAIT_MS = 14000;
 
     private static class Item {
@@ -100,6 +102,9 @@ public class QuizAccessService extends NusukAccessService {
     };
 
     private volatile long lastGeminiEvent;
+    private volatile Rect gemRect;
+    private long lastScrollAt;
+    private int scrollTries;
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
         CharSequence p = e.getPackageName();
@@ -132,7 +137,19 @@ public class QuizAccessService extends NusukAccessService {
         openStore();
         if (tts == null) tts = new android.speech.tts.TextToSpeech(this, st -> {
             ttsReady = st == android.speech.tts.TextToSpeech.SUCCESS;
-            if (ttsReady) tts.setLanguage(Locale.US);
+            if (ttsReady) {
+                tts.setLanguage(Locale.US);
+                try {      // pick the best installed US English voice (sounds more natural)
+                    android.speech.tts.Voice best = null;
+                    for (android.speech.tts.Voice v : tts.getVoices()) {
+                        if (!Locale.US.equals(v.getLocale()) || v.isNetworkConnectionRequired()) continue;
+                        if (v.getFeatures() != null && v.getFeatures().contains("notInstalled")) continue;
+                        if (best == null || v.getQuality() > best.getQuality()) best = v;
+                    }
+                    if (best != null) tts.setVoice(best);
+                } catch (Exception ignored) { }
+                tts.setSpeechRate(0.95f);
+            }
         });
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         box = new LinearLayout(this);
@@ -265,18 +282,23 @@ public class QuizAccessService extends NusukAccessService {
         StringBuilder cap = new StringBuilder();
         List<Item> items = new ArrayList<>();
         boolean gotApp = false;
+        Rect gemUnion = null;
         for (AccessibilityWindowInfo w : getWindows()) {
             AccessibilityNodeInfo r = w.getRoot();
             if (r == null || r.getPackageName() == null) continue;
             String pkg = r.getPackageName().toString();
             if (pkg.equals(getPackageName())) continue;
             if (isGemini(pkg)) {
+                Rect gr = new Rect();
+                w.getBoundsInScreen(gr);
+                gemUnion = gemUnion == null ? gr : unionOf(gemUnion, gr);
                 gather(r, null, cap, 0);                       // caption: real text only, not descriptions
             } else if (!gotApp && pkg.equals(NUSUK) && w.getType() == AccessibilityWindowInfo.TYPE_APPLICATION) {
                 gotApp = true;
                 gather(r, items, null, 0);
             }
         }
+        gemRect = gemUnion;
         s.caption = cap.toString().trim();
 
         List<QuizLogic.Row> rows = new ArrayList<>();
@@ -286,6 +308,27 @@ public class QuizAccessService extends NusukAccessService {
         s.question = res.question;
         for (int i : res.options) s.options.add(items.get(i));
         return s;
+    }
+
+    private static Rect unionOf(Rect a, Rect b) {
+        Rect u = new Rect(a);
+        u.union(b);
+        return u;
+    }
+
+    /** Lines of the caption that were not already there when the question appeared. */
+    private static String newLines(String cap, String base) {
+        Map<String, Integer> cnt = new HashMap<>();
+        for (String l : base.split("\n")) { l = l.trim(); if (!l.isEmpty()) { Integer c = cnt.get(l); cnt.put(l, c == null ? 1 : c + 1); } }
+        StringBuilder sb = new StringBuilder();
+        for (String l : cap.split("\n")) {
+            l = l.trim();
+            if (l.isEmpty()) continue;
+            Integer c = cnt.get(l);
+            if (c != null && c > 0) { cnt.put(l, c - 1); continue; }
+            sb.append(l).append('\n');
+        }
+        return sb.toString().trim();
     }
 
     private void gather(AccessibilityNodeInfo n, List<Item> items, StringBuilder cap, int depth) {
@@ -370,6 +413,12 @@ public class QuizAccessService extends NusukAccessService {
         Snap s = snapshot();
         if (s.options.size() != 4) {
             if (manual) status("No 4-option question found (" + s.candidates + " clickable texts). Press Dump.");
+            else if (kind == QuizLogic.OTHER && s.candidates >= 2 && s.candidates < 4 && scrollTries < 3 && now - lastScrollAt > 2500) {
+                scrollTries++; lastScrollAt = now;      // the 4th option is below the screen or under the caption: scroll
+                scrollScreen();
+                status("Scrolling to reach all 4 options");
+                return;
+            }
             else if (pendingQ != null && now - pendingAt > RESULT_TIMEOUT_MS) giveUpPending();
             return;
         }
@@ -399,16 +448,16 @@ public class QuizAccessService extends NusukAccessService {
         // 2) otherwise follow Gemini's caption
         if (!manual) {
             if (isNew) { status("New question: " + shorten(s.question) + (s.caption.isEmpty() ? " (no Gemini caption: turn captions on)" : "")); return; }
-            // fresh = the caption differs from the one seen when the question appeared, OR Gemini's window
-            // updated after the question appeared (an identical answer such as "Option 2" twice in a row)
-            boolean fresh = !s.caption.isEmpty()
-                    && (!s.caption.equals(baseline) || lastGeminiEvent > questionSince + 400);   // ignore the previous question's caption
+            // Only text that appeared AFTER the question did counts. The previous answer ("Option 1")
+            // often stays in Gemini's window, and must never be read as the answer to this question.
+            String nw = AnswerMatcher.stripOwn(newLines(s.caption, baseline)).trim();
+            boolean fresh = !nw.isEmpty();
             int idx = -1;
             if (fresh) {
-                if (s.caption.equals(prevCap)) stable++; else stable = 0;
-                prevCap = s.caption;
-                idx = AnswerMatcher.pick(s.caption, texts, false);            // clear answer: take it at once
-                if (idx < 0 && stable >= 1) idx = AnswerMatcher.pick(s.caption, texts, true);   // half answer / keyword
+                if (nw.equals(prevCap)) stable++; else stable = 0;
+                prevCap = nw;
+                idx = AnswerMatcher.pick(nw, texts, false);                   // clear answer: take it at once
+                if (idx < 0 && stable >= 1) idx = AnswerMatcher.pick(nw, texts, true);   // half answer / keyword
             }
             if (idx >= 0) { act(s, idx, "gemini"); return; }
             if (guess && now - questionSince > ANSWER_WAIT_MS) {
@@ -420,7 +469,7 @@ public class QuizAccessService extends NusukAccessService {
                 return;
             }
             boolean gemQuiet = now - lastGeminiEvent > 1500 || now - questionSince > 6000;   // do not talk over Gemini
-            if (ask && ttsReady && askCount < 3 && now - questionSince > 1500 && now - lastAskAt > 10000 && gemQuiet) {
+            if (ask && ttsReady && askCount < 100 && now - questionSince > 1500 && now - lastAskAt > 10000 && gemQuiet) {
                 askCount++; lastAskAt = now;
                 String say;
                 if (!briefed) {             // Auto was started before the voice engine was ready
@@ -430,10 +479,10 @@ public class QuizAccessService extends NusukAccessService {
                     say = "Answer.";
                 }
                 tts.speak(say, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "ask");
-                status("Asked Gemini by voice (" + askCount + "/3)");
+                status("Asked Gemini by voice (try " + askCount + ")");
                 return;
             }
-            status(fresh ? "Unclear (not guessing): " + shorten(tail(s.caption)) : "Waiting for Gemini…");
+            status(fresh ? "Unclear (will ask again): " + shorten(tail(nw)) : "Waiting for Gemini…");
             return;
         }
         if (s.caption.isEmpty()) { status("No Gemini caption found"); return; }
@@ -445,18 +494,67 @@ public class QuizAccessService extends NusukAccessService {
     private void act(Snap s, int idx, String source) {
         final Item it = s.options.get(idx);
         final String question = s.question, answer = it.text;
-        boolean ok = clickItem(it);
         handled = true;
         if (source.equals("gemini")) {
             store.record(question, answer, false);
             saveStore();
         }
         log(s, idx, source);
-        status((ok ? "Selected " : "Tap failed for ") + (idx + 1) + " (" + source + "): " + shorten(answer));
-        if (ok) {
-            pendingQ = question; pendingA = answer; pendingAt = System.currentTimeMillis();
-            if (PRESS_CHECK) ui.postDelayed(this::pressCheck, 700);
+        pendingQ = question; pendingA = answer; pendingAt = System.currentTimeMillis();
+        clickOption(it, answer, idx, source, 0);
+    }
+
+    /** True when the option is off the screen or hidden under the Gemini caption window. */
+    private boolean covered(Item it) {
+        int h = getResources().getDisplayMetrics().heightPixels;
+        if (it.bounds.bottom > h || it.bounds.top < 0) return true;
+        Rect g = gemRect;
+        if (g == null) return false;
+        int area = Math.max(1, getResources().getDisplayMetrics().widthPixels * h);
+        if ((long) g.width() * g.height() * 10 > (long) area * 7) return false;   // a near-full-screen window: not a small caption box
+        return g.contains(it.bounds.centerX(), it.bounds.centerY());
+    }
+
+    private void clickOption(Item it, final String answer, final int idx, final String source, final int tries) {
+        if (tries < 3 && covered(it)) {
+            scrollScreen();
+            status("Scrolling: option " + (idx + 1) + " is covered");
+            ui.postDelayed(() -> {
+                Item again = null;
+                for (Item x : appItems()) if (x.text.trim().equalsIgnoreCase(answer.trim()) && x.click != null) { again = x; break; }
+                clickOption(again != null ? again : it, answer, idx, source, tries + 1);
+            }, 900);
+            return;
         }
+        boolean ok = clickItem(it);
+        status((ok ? "Selected " : "Tap failed for ") + (idx + 1) + " (" + source + "): " + shorten(answer));
+        if (ok && PRESS_CHECK) ui.postDelayed(this::pressCheck, 700);
+    }
+
+    /** Scrolls the Nusuk screen up (reveals options hidden below the screen or under the caption). */
+    private void scrollScreen() {
+        AccessibilityNodeInfo root = null;
+        for (AccessibilityWindowInfo w : getWindows()) {
+            AccessibilityNodeInfo r = w.getRoot();
+            if (r != null && r.getPackageName() != null && r.getPackageName().toString().equals(NUSUK)
+                    && w.getType() == AccessibilityWindowInfo.TYPE_APPLICATION) { root = r; break; }
+        }
+        if (root != null && scrollForward(root, 0)) return;
+        int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
+        Path p = new Path();
+        p.moveTo(w * 0.5f, h * 0.70f);
+        p.lineTo(w * 0.5f, h * 0.35f);
+        final PocketLock pl = PocketLock.current;
+        if (pl != null) { pl.pass(true); ui.postDelayed(() -> pl.pass(false), 700); }
+        dispatchGesture(new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(p, 0, 350)).build(), null, null);
+    }
+
+    private boolean scrollForward(AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 30) return false;
+        if (n.isScrollable() && n.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true;
+        for (int i = 0; i < n.getChildCount(); i++) if (scrollForward(n.getChild(i), depth + 1)) return true;
+        return false;
     }
 
     /** Result page (right or wrong, both have "Play again"): learn, then press Play again. */
@@ -474,7 +572,7 @@ public class QuizAccessService extends NusukAccessService {
             status(label + " | " + store.size() + " answers known");
             pendingQ = null;
         }
-        lastKey = ""; handled = false; stable = 0;
+        lastKey = ""; handled = false; stable = 0; scrollTries = 0;
         doorsDone++;
         clickText(app, "play again");
     }

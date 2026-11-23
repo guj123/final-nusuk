@@ -72,6 +72,7 @@ public class FlowTest {
         List<String> mk2 = Arrays.asList("Madinah", "Taif", "Jeddah", "Mecca");
         check(AnswerMatcher.pick("Live\n1\nSharing screen", mk2, true) == -1, "stray '1' on its own line is NOT option 1");
         check(AnswerMatcher.pick("Something unrelated", mk2, true) == -1, "unrelated text -> no pick");
+        check(AnswerMatcher.stripOwn("Option 1, Mecca\nFrom now on, each time I say answer, just reply with the option number only\nAnswer.").trim().equals("Option 1, Mecca"), "own prompt lines stripped");
         System.exit(fails == 0 ? 0 : 1);
     }
 }
