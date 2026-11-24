@@ -82,7 +82,9 @@ public class QuizAccessService extends NusukAccessService {
     private volatile boolean apiFatal;
     private volatile long apiWaitUntil;
     private int apiFails;
-    private String apiLastErr = "";
+    private volatile String apiLastErr = "";
+    private EndpointPicker picker;
+    private static final long FATAL_COOLDOWN_MS = 5 * 60 * 1000;   // bad key/model: leave that endpoint alone for 5 minutes
 
     private String lastKey = "";
     private String watchKey = "";
@@ -253,7 +255,7 @@ public class QuizAccessService extends NusukAccessService {
         autoBtn.setText(auto ? "Stop" : "Auto");
         if (auto) {
             lastKey = ""; pendingQ = null; doorsDone = 0; doorTick = 0;
-            apiFails = 0; apiLastErr = ""; apiFatal = false; apiErr = null; apiIdx = -1; apiForKey = ""; apiWaitUntil = 0;
+            picker = null; apiFails = 0; apiLastErr = ""; apiFatal = false; apiErr = null; apiIdx = -1; apiForKey = ""; apiWaitUntil = 0;
             Awake.hold(this);
             ui.post(tick);
             status("Auto on: waiting for a question");
@@ -459,31 +461,43 @@ public class QuizAccessService extends NusukAccessService {
             for (int i = 0; i < options.size(); i++) { map.add(i); remaining.add(options.get(i)); }
         }
         final List<Ep> eps = endpoints();
+        boolean alternate = getSharedPreferences("nh", MODE_PRIVATE).getBoolean("ep_alternate", true);
+        if (picker == null || picker.size() != eps.size()) picker = new EndpointPicker(eps.size(), alternate);
+        final EndpointPicker pk = picker;
         apiBusy = true;
         new Thread(() -> {
             int idx = -1;
             String source = "api";
             StringBuilder errs = new StringBuilder();
             boolean allFatal = true;
-            long wait = 0;
+            boolean tried = false;
             try {
-                for (int n = 0; n < eps.size(); n++) {
-                    Ep e = eps.get(n);
+                // alternate: 1,2,1,2... ; an endpoint that just failed sits out its cool-down (e.g. the 429 retry-after)
+                for (int k : pk.order(System.currentTimeMillis())) {
+                    Ep e = eps.get(k);
+                    tried = true;
                     LlmClient.Result r = LlmClient.ask(e.url, e.key, e.model, question, remaining);
-                    if (r.idx >= 0) { idx = map.get(r.idx); source = "api" + (n + 1); break; }
-                    errs.append(errs.length() > 0 ? " | " : "").append(eps.size() > 1 ? (n + 1) + ": " : "").append(r.error);
-                    if (!r.fatal) { allFatal = false; wait = Math.max(wait, r.retryAfterMs); }
+                    if (r.idx >= 0) { idx = map.get(r.idx); source = "api" + (k + 1); pk.success(k); break; }
+                    pk.failed(k, System.currentTimeMillis(), r.fatal ? Math.max(r.retryAfterMs, FATAL_COOLDOWN_MS) : r.retryAfterMs);
+                    errs.append(errs.length() > 0 ? " | " : "").append(eps.size() > 1 ? (k + 1) + ": " : "").append(r.error);
+                    if (!r.fatal) allFatal = false;
                 }
             } catch (Exception e) {
                 errs.append("AI error: ").append(e.getMessage());
-                allFatal = false; wait = 4000;
+                allFatal = false; tried = true;
             }
+            long wait = Math.max(1000, pk.soonestReady(System.currentTimeMillis()));
             apiForKey = key;
             apiSource = source;
             apiIdx = idx;
-            apiErr = idx >= 0 ? null : errs.toString();
-            apiFatal = idx < 0 && allFatal;
-            apiWaitUntil = System.currentTimeMillis() + wait;
+            if (idx < 0 && !tried) {                 // every endpoint is cooling down: just wait, this is not a new failure
+                apiErr = null;
+                apiLastErr = "all endpoints cooling down";
+            } else {
+                apiErr = idx >= 0 ? null : errs.toString();
+            }
+            apiFatal = idx < 0 && tried && allFatal;
+            apiWaitUntil = System.currentTimeMillis() + (idx >= 0 ? 0 : wait);
             final String fatalMsg = errs.toString();
             if (apiFatal) ui.post(() -> stopAuto("Stopped, nothing tapped: " + fatalMsg));
             apiBusy = false;

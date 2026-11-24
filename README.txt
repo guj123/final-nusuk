@@ -95,3 +95,11 @@ Permissions: Internet is used when you press 'Download and merge answers' and, w
 - On a wrong page that also states 'The correct answer is X' and X is exactly one option, that option is learned as right.
 - After installing, re-enable the accessibility service (it now also listens for taps). Check quiz_result_log.txt:
   'UNKNOWN' means the result wording was not recognised; send me a line from it and I will add it.
+
+=== v18: endpoints alternate ===
+- With two endpoints set, questions are sent 1, 2, 1, 2 ... (checkbox 'Alternate', on by default) so each endpoint only gets half the requests
+  and rarely hits its rate limit. If the one called fails, the other answers the same question.
+- An endpoint that fails is skipped for its cool-down (the 429 retry-after, 5 min for a bad key/model) instead of being retried on every question.
+  If both are cooling down it waits for the first to be ready; it does not count that as a new failure and never taps anything.
+- Alternate off = endpoint 1 first, endpoint 2 only as backup (still skips an endpoint while it cools down).
+- quiz_history.csv source column shows api1 / api2 / memory.

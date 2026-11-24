@@ -18,8 +18,8 @@ import java.util.Map;
 public final class LlmClient {
     private LlmClient() { }
 
-    public static final String DEFAULT_URL = "https://api.groq.com/openai/v1/chat/completions";
-    public static final String DEFAULT_MODEL = "openai/gpt-oss-20b";
+    public static final String DEFAULT_URL = "";
+    public static final String DEFAULT_MODEL = "";
     /** Tests only: lets the unit test talk to a local http:// mock server. */
     public static boolean allowHttpForTests;
 

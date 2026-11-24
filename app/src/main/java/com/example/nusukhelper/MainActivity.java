@@ -78,7 +78,11 @@ public class MainActivity extends Activity {
         l.addView(text("Examples: Groq https://api.groq.com/openai/v1/chat/completions | Cerebras https://api.cerebras.ai/v1/chat/completions | "
                 + "Mistral https://api.mistral.ai/v1/chat/completions | Gemini https://generativelanguage.googleapis.com/v1beta/openai/chat/completions | "
                 + "OpenRouter https://openrouter.ai/api/v1/chat/completions. Use a model your account is allowed to use (wrong name = HTTP 404)."));
-        final Runnable save = () -> sp.edit()
+        final android.widget.CheckBox alt = new android.widget.CheckBox(this);
+        alt.setText("Alternate: question 1 -> endpoint 1, question 2 -> endpoint 2, then 1, 2, 1, 2... (spreads the rate limit). Off = endpoint 1 first, 2 only as backup.");
+        alt.setChecked(sp.getBoolean("ep_alternate", true));
+        l.addView(alt);
+        final Runnable save = () -> sp.edit().putBoolean("ep_alternate", alt.isChecked())
                 .putString("ep1_url", u1.getText().toString().trim()).putString("ep1_key", k1.getText().toString().trim())
                 .putString("ep1_model", m1.getText().toString().trim())
                 .putString("ep2_url", u2.getText().toString().trim()).putString("ep2_key", k2.getText().toString().trim())
