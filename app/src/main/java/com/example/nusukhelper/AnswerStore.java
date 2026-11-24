@@ -19,7 +19,7 @@ import java.util.Map;
  * File format (keys are lower-case questions without punctuation):
  *   {
  *     "right":      {"how many verses are in surat al fatiha": "7 verses"},    <- confirmed right by Nusuk (or trusted)
- *     "unverified": {"some question": "Some answer"},                          <- from Gemini / imports, not confirmed yet
+ *     "unverified": {"some question": "Some answer"},                          <- from Groq / imports, not confirmed yet
  *     "wrong":      {"some question": ["Bad answer 1", "Bad answer 2"]}
  *   }
  * Also understood when importing: a plain {"question": "answer"} file, and the older {"answers": [...]} format.
@@ -30,7 +30,7 @@ public final class AnswerStore {
     private final File file;
     private final Map<String, Entry> answers = new LinkedHashMap<>();
     private final Map<String, Map<String, String>> wrong = new LinkedHashMap<>();   // normQ -> normA -> answer text
-    /** Use answers that Nusuk has not confirmed yet (from Gemini or an import). */
+    /** Use answers that Nusuk has not confirmed yet (from Groq or an import). */
     public boolean useUnverified = true;
 
     public AnswerStore(File file) { this.file = file; }

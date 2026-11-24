@@ -58,8 +58,33 @@ public class MainActivity extends Activity {
         l.addView(btn("Show CODES box", v -> showCodes()));
 
         l.addView(title("QUIZ mode"));
-        l.addView(text("Floating box: Dump / Answer / Auto / X. Answers from memory (quiz_answers.json), "
-                + "otherwise follows Gemini Live's caption and learns from the result."));
+        l.addView(text("Floating box: Auto / Lock / X. Answers from memory (quiz_answers.json), otherwise asks your AI endpoint. "
+                + "If the AI cannot answer, nothing is tapped. It learns from Nusuk's right/wrong page even when Auto is off "
+                + "(answer by hand while the box is shown)."));
+
+        l.addView(title("AI endpoint 1"));
+        l.addView(text("Any OpenAI-compatible provider. Full URL ending in /chat/completions (a base URL ending in /v1 also works), https only."));
+        final EditText u1 = field("https://api.groq.com/openai/v1/chat/completions", sp.getString("ep1_url", LlmClient.DEFAULT_URL), false);
+        final EditText k1 = field("API key", sp.getString("ep1_key", sp.getString("groq_key", "")), true);
+        final EditText m1 = field("model name", sp.getString("ep1_model", sp.getString("groq_model", LlmClient.DEFAULT_MODEL)), false);
+        l.addView(u1); l.addView(k1); l.addView(m1);
+
+        l.addView(title("AI endpoint 2 (backup, optional)"));
+        l.addView(text("Used only when endpoint 1 fails (rate limit, error). Leave the key empty to disable."));
+        final EditText u2 = field("https://api.cerebras.ai/v1/chat/completions", sp.getString("ep2_url", ""), false);
+        final EditText k2 = field("API key", sp.getString("ep2_key", ""), true);
+        final EditText m2 = field("model name", sp.getString("ep2_model", ""), false);
+        l.addView(u2); l.addView(k2); l.addView(m2);
+        l.addView(text("Examples: Groq https://api.groq.com/openai/v1/chat/completions | Cerebras https://api.cerebras.ai/v1/chat/completions | "
+                + "Mistral https://api.mistral.ai/v1/chat/completions | Gemini https://generativelanguage.googleapis.com/v1beta/openai/chat/completions | "
+                + "OpenRouter https://openrouter.ai/api/v1/chat/completions. Use a model your account is allowed to use (wrong name = HTTP 404)."));
+        final Runnable save = () -> sp.edit()
+                .putString("ep1_url", u1.getText().toString().trim()).putString("ep1_key", k1.getText().toString().trim())
+                .putString("ep1_model", m1.getText().toString().trim())
+                .putString("ep2_url", u2.getText().toString().trim()).putString("ep2_key", k2.getText().toString().trim())
+                .putString("ep2_model", m2.getText().toString().trim()).apply();
+        l.addView(btn("Save endpoints", v -> { save.run(); toast("Saved"); }));
+        l.addView(btn("Save and test endpoints", v -> { save.run(); testEndpoints(); }));
         l.addView(btn("Show QUIZ box", v -> showQuiz()));
         l.addView(btn("Hide QUIZ box", v -> {
             QuizAccessService q = QuizAccessService.instance;
@@ -107,8 +132,9 @@ public class MainActivity extends Activity {
         QuizAccessService q = QuizAccessService.instance;
         if (q == null) { toast("Step 3 not done: turn on the Nusuk Helper accessibility service"); return; }
         sp.edit().putString("dir", folder()).apply();
+        if (sp.getString("ep1_key", sp.getString("groq_key", "")).trim().isEmpty()) { toast("Enter the endpoint 1 API key and press 'Save endpoints' first"); return; }
         q.showBox();                                        // also switches the codes box off
-        toast("Quiz box shown. Open Nusuk and Gemini Live.");
+        toast("Quiz box shown. Open Nusuk.");
     }
 
     /** Runs only when you press the button. https only, max 5 MB; saved as quiz_import.json, merged as "unverified". */
@@ -144,6 +170,42 @@ public class MainActivity extends Activity {
                 if (s != null) s.importNow();               // otherwise merged next time the quiz box is shown
             });
         }).start();
+    }
+
+    /** Sends one easy test question to each configured endpoint and shows what happened. */
+    private void testEndpoints() {
+        final String[] names = {"ep1", "ep2"};
+        toast("Testing...");
+        new Thread(() -> {
+            StringBuilder out = new StringBuilder();
+            for (int n = 0; n < 2; n++) {
+                String key = sp.getString(names[n] + "_key", n == 0 ? sp.getString("groq_key", "") : "");
+                if (n == 1 && key.trim().isEmpty()) { out.append("Endpoint 2: not set\n"); continue; }
+                String url = sp.getString(names[n] + "_url", n == 0 ? LlmClient.DEFAULT_URL : "");
+                String model = sp.getString(names[n] + "_model", n == 0 ? LlmClient.DEFAULT_MODEL : "");
+                long t0 = System.currentTimeMillis();
+                LlmClient.Result r = LlmClient.ask(url, key, model, "Which city is the Kaaba in?",
+                        java.util.Arrays.asList("Taif", "Mecca", "Jeddah", "Medina"));
+                long ms = System.currentTimeMillis() - t0;
+                out.append("Endpoint ").append(n + 1).append(": ");
+                if (r.idx == 1) out.append("OK, correct answer (").append(ms).append(" ms)");
+                else if (r.idx >= 0) out.append("works but answered option ").append(r.idx + 1).append(" (wrong, the model is weak)");
+                else out.append("FAILED: ").append(r.error);
+                out.append("\n");
+            }
+            final String msg = out.toString();
+            runOnUiThread(() -> new android.app.AlertDialog.Builder(this).setTitle("Endpoint test")
+                    .setMessage(msg).setPositiveButton("OK", null).show());
+        }).start();
+    }
+
+    private EditText field(String hint, String value, boolean secret) {
+        EditText e = new EditText(this);
+        e.setSingleLine(true);
+        e.setHint(hint);
+        e.setText(value);
+        if (secret) e.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        return e;
     }
 
     private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }

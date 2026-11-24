@@ -2,7 +2,7 @@ Nusuk Helper - two separate modes
   Nusuk Helper icon : enter codes (floating box: Start/Stop). Reads final.txt, moves each code to used.txt.
   Nusuk Quiz icon   : answer door questions (floating box: Dump / Answer / Auto / X).
                       Answers from its own memory (quiz_answers.json, offline) when the question is known,
-                      otherwise follows Gemini Live's caption, then learns from Nusuk's right/wrong screen.
+                      otherwise asks your AI endpoint (any OpenAI-compatible API, no Gemini), then learns from Nusuk's right/wrong screen.
 Showing one floating box switches the other one off.
 
 Files in the chosen folder (default Download/C):
@@ -18,7 +18,7 @@ Files in the chosen folder (default Download/C):
 Build: upload everything (keep the hidden .github folder) to a private GitHub repository -> Actions -> Build APK ->
 download the NusukHelper-apk artifact. (Gradle ignores the tests/ folder; they run with plain javac.)
 
-Permissions: Internet is used ONLY when you press 'Download and merge answers' (https link you type, max 5 MB). Nothing runs in the background.
+Permissions: Internet is used when you press 'Download and merge answers' and, while Quiz Auto runs, to call the Groq API for questions not in memory. Nothing runs in the background.
 
 === Update: one app, two floating boxes ===
 - Open the app: "Show CODES box" or "Show QUIZ box". Showing one hides the other.
@@ -71,3 +71,27 @@ Permissions: Internet is used ONLY when you press 'Download and merge answers' (
 - Ask retries until answered (no limit), never guesses.
 - Briefing: "just reply with the option number only"; best installed US voice, slower rate.
 - Scrolls the Nusuk screen when an option is off-screen or under the Gemini caption window.
+
+=== v16: Groq API instead of Gemini Live ===
+- Gemini Live, voice prompts (text-to-speech), caption reading, "Ask" and "Guess" are all removed.
+- Unknown question -> one short request to Groq: system "Reply only with the single digit (1, 2, 3, or 4) ...", user = question + numbered options,
+  max_tokens 2, temperature 0 (reasoning models such as gpt-oss/qwen get max_completion_tokens 512 so they can finish thinking).
+- Setup: Nusuk Helper app -> paste Groq API key + model -> "Save Groq settings". Default model openai/gpt-oss-20b (use any chat model enabled in your Groq project: gpt-oss-120b, qwen/..., etc.).
+- NEVER taps a blind option. Only a clear single digit 1-4 from Groq is tapped. If the API fails (offline, 429 rate limit, odd reply)
+  it taps nothing, shows the reason in the box and retries (honours Groq's retry-after).
+  Auto stops (nothing tapped) on: bad key/model (401/403/404/400), daily quota reached (retry-after > 2 min), or 6 failures in a row on one question.
+- Groq answers are stored as 'unverified' and corrected by Nusuk's right/wrong screen, as before.
+- Log columns: quiz_history.csv no longer has gemini_caption; source is now memory / groq.
+- Test the API part with plain javac: tests/LlmTest.java and tests/ResultTest.java (uses a local mock server).
+
+=== v17: custom endpoints + learns with Auto off ===
+- Quiz settings now have AI endpoint 1 and an optional backup endpoint 2: each = https URL + API key + model name
+  (Groq, Cerebras, Mistral, Gemini OpenAI mode, OpenRouter, your own server...). A base URL ending in /v1 also works.
+  'Save and test endpoints' asks a sample question and shows OK / the exact error. Old Groq key/model settings are carried over.
+- If endpoint 1 fails (rate limit, error) endpoint 2 is tried. If all fail: nothing is tapped, retry, Auto stops on bad key/model or 6 failures.
+- Wrong options already learned for a question are left out of what the AI is asked (it chooses among fewer options).
+- Learning with Auto OFF: while the floating box is shown it watches Nusuk. When you answer by hand it notes which option you tapped
+  (from the tap event, or the option shown as selected) and learns from the right/wrong page. It never taps by itself.
+- On a wrong page that also states 'The correct answer is X' and X is exactly one option, that option is learned as right.
+- After installing, re-enable the accessibility service (it now also listens for taps). Check quiz_result_log.txt:
+  'UNKNOWN' means the result wording was not recognised; send me a line from it and I will add it.
